@@ -10,16 +10,28 @@ import StaffPage from './pages/StaffPage'
 import OverduePage from './pages/OverduePage'
 
 function ProtectedRoute({ children, adminOnly = false }) {
-  const { user, staffProfile, loading } = useAuth()
+  const { user, staffProfile, loading, profileLoading } = useAuth()
 
-  if (loading) return (
+  if (loading || profileLoading) return (
     <div className="loading-page">
       <div className="spinner"></div>
       <span>Loading...</span>
     </div>
   )
 
-  if (!user || !staffProfile) return <Navigate to="/login" replace />
+  if (!user) return <Navigate to="/login" replace />
+
+  // If user exists but staffProfile is null, show an error instead of redirect loop
+  if (!staffProfile) return (
+    <div className="loading-page">
+      <p style={{ color: 'var(--danger)', textAlign: 'center', maxWidth: 320 }}>
+        ⚠️ Your account is not linked to a staff profile.<br />
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8, display: 'block' }}>
+          Ask your admin to add you in the staff table in Supabase.
+        </span>
+      </p>
+    </div>
+  )
 
   if (adminOnly && staffProfile.role !== 'admin') return <Navigate to="/" replace />
 
@@ -27,11 +39,17 @@ function ProtectedRoute({ children, adminOnly = false }) {
 }
 
 function AppRoutes() {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
+
+  if (loading) return (
+    <div className="loading-page">
+      <div className="spinner"></div>
+    </div>
+  )
 
   return (
     <Routes>
-      <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+      <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/" replace />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Dashboard />} />
         <Route path="attendance" element={<AttendancePage />} />

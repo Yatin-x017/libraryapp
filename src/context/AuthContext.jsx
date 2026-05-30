@@ -7,43 +7,59 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [staffProfile, setStaffProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
 
   async function fetchStaffProfile(userId) {
-    const { data, error } = await supabase
-      .from('staff')
-      .select('*')
-      .eq('id', userId)
-      .single()
-    if (!error) setStaffProfile(data)
+    setProfileLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('staff')
+        .select('*')
+        .eq('id', userId)
+        .single()
+      if (!error && data) setStaffProfile(data)
+      else setStaffProfile(null)
+    } catch {
+      setStaffProfile(null)
+    }
+    setProfileLoading(false)
   }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) fetchStaffProfile(session.user.id)
-      setLoading(false)
+      const u = session?.user ?? null
+      setUser(u)
+      if (u) {
+        fetchStaffProfile(u.id).finally(() => setLoading(false))
+      } else {
+        setLoading(false)
+      }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      if (session?.user) fetchStaffProfile(session.user.id)
-      else setStaffProfile(null)
+      const u = session?.user ?? null
+      setUser(u)
+      if (u) fetchStaffProfile(u.id)
+      else { setStaffProfile(null) }
     })
 
     return () => subscription.unsubscribe()
   }, [])
 
   async function signIn(email, password) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (!error && data.user) await fetchStaffProfile(data.user.id)
     return { error }
   }
 
   async function signOut() {
     await supabase.auth.signOut()
+    setStaffProfile(null)
+    setUser(null)
   }
 
   return (
-    <AuthContext.Provider value={{ user, staffProfile, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, staffProfile, loading, profileLoading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )
