@@ -24,7 +24,7 @@ export default function Layout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <h1>📚 LibraryOS</h1>
+          <h1>Balaji Library</h1>
           <span>Attendance & Fee Manager</span>
         </div>
 
