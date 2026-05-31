@@ -26,7 +26,7 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <div className="login-card">
-        <h1>📚 LibraryOS</h1>
+        <h1>Balaji Library</h1>
         <p>Sign in to manage attendance and fees</p>
 
         {error && (
