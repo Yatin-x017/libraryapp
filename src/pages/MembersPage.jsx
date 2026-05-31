@@ -94,6 +94,7 @@ export default function MembersPage() {
   const [editMember, setEditMember] = useState(null)
   const [msg, setMsg] = useState(null)
   const [filter, setFilter] = useState('active') // active | inactive | all
+  const [deleteConfirm, setDeleteConfirm] = useState(null) // member to delete
 
   useEffect(() => { fetchMembers() }, [])
 
@@ -120,6 +121,17 @@ export default function MembersPage() {
     setShowModal(false)
     setEditMember(null)
     fetchMembers()
+  }
+
+  async function deleteMember(member) {
+    const { error } = await supabase.from('members').delete().eq('id', member.id)
+    if (error) {
+      setMsg({ type: 'danger', text: error.message })
+    } else {
+      setMsg({ type: 'success', text: `${member.name} deleted.` })
+      fetchMembers()
+    }
+    setDeleteConfirm(null)
   }
 
   function openEdit(member) { setEditMember(member); setShowModal(true) }
@@ -196,8 +208,9 @@ export default function MembersPage() {
                   <td>₹{m.fee_amount}</td>
                   <td>{m.fee_due_day}</td>
                   <td><span className={`badge ${m.is_active ? 'badge-success' : 'badge-neutral'}`}>{m.is_active ? 'Active' : 'Inactive'}</span></td>
-                  <td>
+                  <td style={{ display: 'flex', gap: 6 }}>
                     <button className="btn btn-sm" onClick={() => openEdit(m)}>Edit</button>
+                    <button className="btn btn-sm" style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => setDeleteConfirm(m)}>Delete</button>
                   </td>
                 </tr>
               ))}
@@ -212,6 +225,26 @@ export default function MembersPage() {
           onClose={() => { setShowModal(false); setEditMember(null) }}
           onSave={saveMember}
         />
+      )}
+
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Delete Member</h3>
+              <button className="btn btn-icon" onClick={() => setDeleteConfirm(null)}>✕</button>
+            </div>
+            <p style={{ margin: '12px 0 24px', color: 'var(--text-muted)' }}>
+              Are you sure you want to delete <strong>{deleteConfirm.name}</strong>? This will also delete all their attendance and fee records. This cannot be undone.
+            </p>
+            <div className="modal-actions">
+              <button className="btn" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+              <button className="btn btn-primary" style={{ background: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => deleteMember(deleteConfirm)}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
