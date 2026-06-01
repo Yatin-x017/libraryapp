@@ -215,7 +215,7 @@ export default function Attendance() {
                 const isSelected = date === activeDate;
                 return (
                   <button key={date} onClick={() => setSelectedDate(date)} style={{
-                    padding: '10px 14px', borderRadius: '10px', cursor: 'pointer', textAlign: 'left',
+                    padding: '10px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer', textAlign: 'left',
                     background: isSelected ? 'rgba(245,158,11,0.12)' : 'transparent',
                     border: `1px solid ${isSelected ? 'rgba(245,158,11,0.4)' : '#1e293b'}`,
                     transition: 'all 0.12s',
