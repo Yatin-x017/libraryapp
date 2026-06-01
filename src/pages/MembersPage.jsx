@@ -95,6 +95,7 @@ export default function MembersPage() {
   const [msg, setMsg] = useState(null)
   const [filter, setFilter] = useState('active') // active | inactive | all
   const [deleteConfirm, setDeleteConfirm] = useState(null) // member to delete
+  const [pickSearch, setPickSearch] = useState('')
 
   useEffect(() => { fetchMembers() }, [])
 
@@ -132,6 +133,7 @@ export default function MembersPage() {
       fetchMembers()
     }
     setDeleteConfirm(null)
+    setPickSearch('')
   }
 
   function openEdit(member) { setEditMember(member); setShowModal(true) }
@@ -153,7 +155,10 @@ export default function MembersPage() {
             <h2>Members</h2>
             <p>{members.filter(m => m.is_active).length} active members</p>
           </div>
-          <button className="btn btn-primary" onClick={openAdd}>+ Add Member</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => setDeleteConfirm('pick')}>− Remove Member</button>
+            <button className="btn btn-primary" onClick={openAdd}>+ Add Member</button>
+          </div>
         </div>
       </div>
 
@@ -227,7 +232,56 @@ export default function MembersPage() {
         />
       )}
 
-      {deleteConfirm && (
+      {deleteConfirm && deleteConfirm === 'pick' && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Remove Member</h3>
+              <button className="btn btn-icon" onClick={() => setDeleteConfirm(null)}>✕</button>
+            </div>
+            <p style={{ margin: '4px 0 12px', color: 'var(--text-muted)', fontSize: 14 }}>Select a member to remove:</p>
+            <div className="search-bar" style={{ marginBottom: 12 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input
+                placeholder="Search members..."
+                autoFocus
+                value={pickSearch}
+                onChange={e => setPickSearch(e.target.value)}
+              />
+            </div>
+            <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+              {members.filter(m =>
+                m.name.toLowerCase().includes(pickSearch.toLowerCase()) ||
+                m.member_id.toLowerCase().includes(pickSearch.toLowerCase()) ||
+                (m.phone || '').includes(pickSearch)
+              ).length === 0
+                ? <p style={{ padding: 16, color: 'var(--text-muted)', textAlign: 'center' }}>No members found.</p>
+                : members.filter(m =>
+                m.name.toLowerCase().includes(pickSearch.toLowerCase()) ||
+                m.member_id.toLowerCase().includes(pickSearch.toLowerCase()) ||
+                (m.phone || '').includes(pickSearch)
+              ).map(m => (
+                  <div key={m.id} onClick={() => setDeleteConfirm(m)}
+                    style={{ padding: '10px 16px', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
+                    onMouseLeave={e => e.currentTarget.style.background = ''}>
+                    <div>
+                      <div style={{ fontWeight: 500 }}>{m.name}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{m.member_id} · {m.phone || 'no phone'}</div>
+                    </div>
+                    <span className={`badge ${m.is_active ? 'badge-success' : 'badge-neutral'}`}>{m.is_active ? 'Active' : 'Inactive'}</span>
+                  </div>
+                ))}
+              }
+            </div>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirm && deleteConfirm !== 'pick' && (
         <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
           <div className="modal" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
@@ -238,7 +292,7 @@ export default function MembersPage() {
               Are you sure you want to delete <strong>{deleteConfirm.name}</strong>? This will also delete all their attendance and fee records. This cannot be undone.
             </p>
             <div className="modal-actions">
-              <button className="btn" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+              <button className="btn" onClick={() => setDeleteConfirm('pick')}>← Back</button>
               <button className="btn btn-primary" style={{ background: 'var(--danger)', borderColor: 'var(--danger)' }} onClick={() => deleteMember(deleteConfirm)}>
                 Delete
               </button>
