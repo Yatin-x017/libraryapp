@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
-import { format, isAfter } from 'date-fns'
+import { useLang } from '../context/LanguageContext'
 
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const MONTHS_EN = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const MONTHS_HI = ['जनवरी','फरवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्तूबर','नवंबर','दिसंबर']
 
 export default function OverduePage() {
+  const { t, lang } = useLang()
+  const months = lang === 'hi' ? MONTHS_HI : MONTHS_EN
   const [overdue, setOverdue] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -17,25 +20,10 @@ export default function OverduePage() {
 
   async function fetchOverdue() {
     setLoading(true)
-
-    // Get all active members
-    const { data: allMembers } = await supabase
-      .from('members')
-      .select('id, name, member_id, phone, email, fee_amount, fee_due_day')
-      .eq('is_active', true)
-      .order('name')
-
-    // Get paid members for target month/year
-    const { data: paidData } = await supabase
-      .from('fee_payments')
-      .select('member_id')
-      .eq('month', targetMonth)
-      .eq('year', targetYear)
-
+    const { data: allMembers } = await supabase.from('members').select('id, name, member_id, phone, email, fee_amount, fee_due_day').eq('is_active', true).order('name')
+    const { data: paidData } = await supabase.from('fee_payments').select('member_id').eq('month', targetMonth).eq('year', targetYear)
     const paidIds = new Set((paidData || []).map(p => p.member_id))
-    const overdueMembers = (allMembers || []).filter(m => !paidIds.has(m.id))
-
-    setOverdue(overdueMembers)
+    setOverdue((allMembers || []).filter(m => !paidIds.has(m.id)))
     setLoading(false)
   }
 
@@ -43,9 +31,7 @@ export default function OverduePage() {
     const today = new Date()
     if (targetYear < today.getFullYear()) return true
     if (targetYear === today.getFullYear() && targetMonth < today.getMonth() + 1) return true
-    if (targetYear === today.getFullYear() && targetMonth === today.getMonth() + 1) {
-      return today.getDate() > dueDay
-    }
+    if (targetYear === today.getFullYear() && targetMonth === today.getMonth() + 1) return today.getDate() > dueDay
     return false
   }
 
@@ -59,8 +45,8 @@ export default function OverduePage() {
 
   function copyAlertList() {
     const text = filtered.map(m => `${m.name} (${m.member_id}) - ₹${m.fee_amount} - ${m.phone || 'No phone'}`).join('\n')
-    navigator.clipboard.writeText(`OVERDUE FEES - ${MONTHS[targetMonth-1]} ${targetYear}\n\n${text}`)
-    alert('Copied to clipboard!')
+    navigator.clipboard.writeText(`OVERDUE FEES - ${months[targetMonth-1]} ${targetYear}\n\n${text}`)
+    alert(t.copySuccess)
   }
 
   return (
@@ -68,12 +54,12 @@ export default function OverduePage() {
       <div className="page-header">
         <div className="flex items-center justify-between">
           <div>
-            <h2>⚠️ Overdue Fees</h2>
-            <p>Members who haven't paid their fee</p>
+            <h2>⚠️ {t.overdueTitle}</h2>
+            <p>{t.overdueSubtitle}</p>
           </div>
           <div className="flex items-center gap-2">
-            <select className="form-select" style={{ width: 110 }} value={targetMonth} onChange={e => setTargetMonth(parseInt(e.target.value))}>
-              {MONTHS.map((m, i) => <option key={i} value={i+1}>{m.slice(0,3)}</option>)}
+            <select className="form-select" style={{ width: 120 }} value={targetMonth} onChange={e => setTargetMonth(parseInt(e.target.value))}>
+              {months.map((m, i) => <option key={i} value={i+1}>{m.slice(0,3)}</option>)}
             </select>
             <select className="form-select" style={{ width: 90 }} value={targetYear} onChange={e => setTargetYear(parseInt(e.target.value))}>
               {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
@@ -86,8 +72,8 @@ export default function OverduePage() {
         <div className="alert alert-warning">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <span>
-            <strong>{overdue.length} members</strong> have not paid their fee for {MONTHS[targetMonth-1]} {targetYear}.
-            Total outstanding: <strong>₹{totalUnpaid.toLocaleString()}</strong>
+            <strong>{overdue.length} {t.membersUnpaid}</strong> {months[targetMonth-1]} {targetYear}.
+            &nbsp;₹{totalUnpaid.toLocaleString()}
           </span>
         </div>
       )}
@@ -95,21 +81,17 @@ export default function OverduePage() {
       {overdue.length === 0 && !loading && (
         <div className="alert alert-success">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
-          All members have paid for {MONTHS[targetMonth-1]} {targetYear}. 🎉
+          {t.noOverdue}
         </div>
       )}
 
       <div className="flex items-center justify-between mb-4">
         <div className="search-bar" style={{ flex: 1, marginBottom: 0, marginRight: 10 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input placeholder="Search overdue members..." value={search} onChange={e => setSearch(e.target.value)} />
+          <input placeholder={t.searchOverdue} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <button className="btn btn-sm" onClick={copyAlertList} disabled={filtered.length === 0}>
-          📋 Copy List
-        </button>
-        <button className="btn btn-sm btn-primary" onClick={() => navigate('/fees')} style={{ marginLeft: 6 }}>
-          + Record Payment
-        </button>
+        <button className="btn btn-sm" onClick={copyAlertList} disabled={filtered.length === 0}>{t.copyAlertList}</button>
+        <button className="btn btn-sm btn-primary" onClick={() => navigate('/fees')} style={{ marginLeft: 6 }}>{t.recordPayment}</button>
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -118,13 +100,13 @@ export default function OverduePage() {
             <thead>
               <tr>
                 <th>#</th>
-                <th>Member</th>
-                <th>ID</th>
-                <th>Phone</th>
-                <th>Email</th>
-                <th>Amount Due</th>
-                <th>Due Day</th>
-                <th>Status</th>
+                <th>{t.member}</th>
+                <th>{t.memberId}</th>
+                <th>{t.phone}</th>
+                <th>{t.email}</th>
+                <th>{t.amount}</th>
+                <th>{t.dueDay}</th>
+                <th>{t.status}</th>
               </tr>
             </thead>
             <tbody>
@@ -132,7 +114,7 @@ export default function OverduePage() {
                 <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
-                  {search ? 'No results found.' : 'All clear! No overdue fees.'}
+                  {search ? t.noMembersFoundSearch : t.noOverdue}
                 </td></tr>
               ) : filtered.map((m, idx) => {
                 const pastDue = isDueDatePassed(m.fee_due_day)
@@ -147,8 +129,8 @@ export default function OverduePage() {
                     <td>{m.fee_due_day}</td>
                     <td>
                       {pastDue
-                        ? <span className="badge badge-danger">⚠️ Overdue</span>
-                        : <span className="badge badge-warning">Pending</span>
+                        ? <span className="badge badge-danger">⚠️ {t.overdueBadge}</span>
+                        : <span className="badge badge-warning">{t.dueSoon}</span>
                       }
                     </td>
                   </tr>
