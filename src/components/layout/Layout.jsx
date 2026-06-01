@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { useLang } from '../../context/LanguageContext'
 
 const Icons = {
   Home: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
@@ -13,6 +14,7 @@ const Icons = {
 
 export default function Layout() {
   const { staffProfile, signOut } = useAuth()
+  const { lang, t, toggleLang } = useLang()
   const navigate = useNavigate()
 
   async function handleSignOut() {
@@ -24,49 +26,85 @@ export default function Layout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <h1>Balaji Library</h1>
-          <span>Attendance & Fee Manager</span>
+          <h1>📚 {t.appName}</h1>
+          <span>{t.appSubtitle}</span>
         </div>
 
         <nav className="sidebar-nav">
           <div className="nav-section">
-            <div className="nav-label">Overview</div>
+            <div className="nav-label">{t.overview}</div>
             <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Icons.Home /> Dashboard
+              <Icons.Home /> {t.dashboard}
             </NavLink>
           </div>
 
           <div className="nav-section">
-            <div className="nav-label">Daily Work</div>
+            <div className="nav-label">{t.dailyWork}</div>
             <NavLink to="/attendance" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Icons.Calendar /> Mark Attendance
+              <Icons.Calendar /> {t.markAttendance}
             </NavLink>
             <NavLink to="/overdue" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Icons.AlertTriangle /> Overdue Fees
+              <Icons.AlertTriangle /> {t.overdueFees}
             </NavLink>
           </div>
 
           <div className="nav-section">
-            <div className="nav-label">Management</div>
+            <div className="nav-label">{t.management}</div>
             <NavLink to="/members" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Icons.Users /> Members
+              <Icons.Users /> {t.members}
             </NavLink>
             <NavLink to="/fees" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-              <Icons.CreditCard /> Fee Payments
+              <Icons.CreditCard /> {t.feePayments}
             </NavLink>
             {staffProfile?.role === 'admin' && (
               <NavLink to="/staff" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                <Icons.Shield /> Staff
+                <Icons.Shield /> {t.staff}
               </NavLink>
             )}
           </div>
         </nav>
 
+        {/* Language Toggle */}
+        <div style={{ padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Language
+            </span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>
+              {lang === 'en' ? 'EN' : 'हि'}
+            </span>
+          </div>
+          <button
+            onClick={toggleLang}
+            style={{
+              width: '100%', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+              borderRadius: 8, padding: '6px 4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 0
+            }}
+          >
+            <span style={{
+              flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 600, padding: '4px 0', borderRadius: 6,
+              background: lang === 'en' ? 'rgba(255,255,255,0.2)' : 'transparent',
+              color: lang === 'en' ? '#fff' : 'rgba(255,255,255,0.45)',
+              transition: 'all 0.2s'
+            }}>
+              🇬🇧 English
+            </span>
+            <span style={{
+              flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 600, padding: '4px 0', borderRadius: 6,
+              background: lang === 'hi' ? 'rgba(255,255,255,0.2)' : 'transparent',
+              color: lang === 'hi' ? '#fff' : 'rgba(255,255,255,0.45)',
+              transition: 'all 0.2s'
+            }}>
+              🇮🇳 हिंदी
+            </span>
+          </button>
+        </div>
+
         <div className="sidebar-footer">
           <div className="staff-name">{staffProfile?.name || 'Staff'}</div>
-          <div className="staff-role">{staffProfile?.role || ''}</div>
+          <div className="staff-role">{staffProfile?.role === 'admin' ? t.admin : t.staff}</div>
           <button onClick={handleSignOut}>
-            Sign Out
+            {t.signOut}
           </button>
         </div>
       </aside>
