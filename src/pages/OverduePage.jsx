@@ -9,24 +9,21 @@ const MONTHS_HI = ['जनवरी','फरवरी','मार्च','अप
 // How many 30-day cycles have elapsed since the member's original due date?
 // e.g. due 1 Jun, checking on 3 Jul → 1 full cycle passed → ₹500 × 2 (Jun + Jul)
 function calcAmountDue(member, asOfDate) {
-  const { fee_due_day, fee_amount, join_date } = member
+  const { fee_due_day, fee_amount } = member
   const base = parseFloat(fee_amount) || 0
   if (!fee_due_day || base === 0) return { cycles: 1, total: base }
 
-  // Original due date: the fee_due_day of the month they joined (or earliest unpaid month)
-  // We use join_date if available, else fall back to 12 months ago
-  const joinRef = join_date ? new Date(join_date) : new Date(asOfDate.getFullYear() - 1, asOfDate.getMonth(), fee_due_day)
-  const originalDue = new Date(joinRef.getFullYear(), joinRef.getMonth(), fee_due_day)
+  // Original due date: fee_due_day of the current month being viewed
+  // We look back to find how many 30-day periods have passed since that day
+  const dueThisMonth = new Date(asOfDate.getFullYear(), asOfDate.getMonth(), fee_due_day)
 
-  // If original due is in the future relative to asOfDate, not yet overdue
-  if (originalDue > asOfDate) return { cycles: 0, total: 0 }
+  // If due date hasn't passed yet this month, check from last month's due date
+  const originalDue = dueThisMonth <= asOfDate ? dueThisMonth
+    : new Date(asOfDate.getFullYear(), asOfDate.getMonth() - 1, fee_due_day)
 
-  // Days elapsed since original due date
   const msPerDay = 1000 * 60 * 60 * 24
-  const daysElapsed = Math.floor((asOfDate - originalDue) / msPerDay)
-
-  // Full 30-day cycles completed (minimum 1 since they're in the overdue list)
-  const cycles = Math.max(1, Math.ceil(daysElapsed / 30))
+  const daysElapsed = Math.max(0, Math.floor((asOfDate - originalDue) / msPerDay))
+  const cycles = Math.max(1, Math.ceil((daysElapsed + 1) / 30))
 
   return { cycles, total: base * cycles }
 }
@@ -46,11 +43,12 @@ export default function OverduePage() {
 
   async function fetchOverdue() {
     setLoading(true)
-    const { data: allMembers } = await supabase
+    const { data: allMembers, error: memberError } = await supabase
       .from('members')
-      .select('id, name, member_id, phone, email, fee_amount, fee_due_day, join_date')
+      .select('id, name, member_id, phone, email, fee_amount, fee_due_day')
       .eq('is_active', true)
       .order('name')
+    if (memberError) console.error('members fetch error:', memberError)
     const { data: paidData } = await supabase
       .from('fee_payments')
       .select('member_id')
