@@ -184,7 +184,7 @@ export default function HelpPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 12, fontSize: 13, color: 'var(--text-muted)' }}>
-          <span>📱 {lang === 'hi' ? 'yatinx017@gmail.com पर संपर्क करें' : 'Email me at : yainx017@gmail.com'}</span>
+          <span>📱 {lang === 'hi' ? 'yatinx017@gmail.com पर संपर्क करें' : 'Email me at : yatinx017@gmail.com'}</span>
         </div>
       </div>
 
