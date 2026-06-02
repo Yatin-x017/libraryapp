@@ -6,29 +6,62 @@ import { useLang } from '../context/LanguageContext'
 const MONTHS_EN = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const MONTHS_HI = ['जनवरी','फरवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्तूबर','नवंबर','दिसंबर']
 
+// How many 30-day cycles have elapsed since the member's original due date?
+// e.g. due 1 Jun, checking on 3 Jul → 1 full cycle passed → ₹500 × 2 (Jun + Jul)
+function calcAmountDue(member, asOfDate) {
+  const { fee_due_day, fee_amount, join_date } = member
+  const base = parseFloat(fee_amount) || 0
+  if (!fee_due_day || base === 0) return { cycles: 1, total: base }
+
+  // Original due date: the fee_due_day of the month they joined (or earliest unpaid month)
+  // We use join_date if available, else fall back to 12 months ago
+  const joinRef = join_date ? new Date(join_date) : new Date(asOfDate.getFullYear() - 1, asOfDate.getMonth(), fee_due_day)
+  const originalDue = new Date(joinRef.getFullYear(), joinRef.getMonth(), fee_due_day)
+
+  // If original due is in the future relative to asOfDate, not yet overdue
+  if (originalDue > asOfDate) return { cycles: 0, total: 0 }
+
+  // Days elapsed since original due date
+  const msPerDay = 1000 * 60 * 60 * 24
+  const daysElapsed = Math.floor((asOfDate - originalDue) / msPerDay)
+
+  // Full 30-day cycles completed (minimum 1 since they're in the overdue list)
+  const cycles = Math.max(1, Math.ceil(daysElapsed / 30))
+
+  return { cycles, total: base * cycles }
+}
+
 export default function OverduePage() {
   const { t, lang } = useLang()
   const months = lang === 'hi' ? MONTHS_HI : MONTHS_EN
-  const [overdue, setOverdue] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  const [overdue, setOverdue]       = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [search, setSearch]         = useState('')
   const [targetMonth, setTargetMonth] = useState(new Date().getMonth() + 1)
-  const [targetYear, setTargetYear] = useState(new Date().getFullYear())
+  const [targetYear, setTargetYear]   = useState(new Date().getFullYear())
   const navigate = useNavigate()
+  const today = new Date()
 
   useEffect(() => { fetchOverdue() }, [targetMonth, targetYear])
 
   async function fetchOverdue() {
     setLoading(true)
-    const { data: allMembers } = await supabase.from('members').select('id, name, member_id, phone, email, fee_amount, fee_due_day').eq('is_active', true).order('name')
-    const { data: paidData } = await supabase.from('fee_payments').select('member_id').eq('month', targetMonth).eq('year', targetYear)
+    const { data: allMembers } = await supabase
+      .from('members')
+      .select('id, name, member_id, phone, email, fee_amount, fee_due_day, join_date')
+      .eq('is_active', true)
+      .order('name')
+    const { data: paidData } = await supabase
+      .from('fee_payments')
+      .select('member_id')
+      .eq('month', targetMonth)
+      .eq('year', targetYear)
     const paidIds = new Set((paidData || []).map(p => p.member_id))
     setOverdue((allMembers || []).filter(m => !paidIds.has(m.id)))
     setLoading(false)
   }
 
   function isDueDatePassed(dueDay) {
-    const today = new Date()
     if (targetYear < today.getFullYear()) return true
     if (targetYear === today.getFullYear() && targetMonth < today.getMonth() + 1) return true
     if (targetYear === today.getFullYear() && targetMonth === today.getMonth() + 1) return today.getDate() > dueDay
@@ -41,11 +74,18 @@ export default function OverduePage() {
     (m.phone || '').includes(search)
   )
 
-  const totalUnpaid = filtered.reduce((sum, m) => sum + parseFloat(m.fee_amount), 0)
+  // Total accumulated across all overdue members
+  const grandTotal = filtered.reduce((sum, m) => {
+    const { total } = calcAmountDue(m, today)
+    return sum + total
+  }, 0)
 
   function copyAlertList() {
-    const text = filtered.map(m => `${m.name} (${m.member_id}) - ₹${m.fee_amount} - ${m.phone || 'No phone'}`).join('\n')
-    navigator.clipboard.writeText(`OVERDUE FEES - ${months[targetMonth-1]} ${targetYear}\n\n${text}`)
+    const lines = filtered.map(m => {
+      const { cycles, total } = calcAmountDue(m, today)
+      return `${m.name} (${m.member_id}) - ₹${total} (${cycles} month${cycles !== 1 ? 's' : ''}) - ${m.phone || 'No phone'}`
+    })
+    navigator.clipboard.writeText(`OVERDUE FEES - ${months[targetMonth-1]} ${targetYear}\n\n${lines.join('\n')}`)
     alert(t.copySuccess)
   }
 
@@ -55,7 +95,7 @@ export default function OverduePage() {
         <div className="flex items-center justify-between">
           <div>
             <h2>⚠️ {t.overdueTitle}</h2>
-            <p>{t.overdueSubtitle}</p>
+            <p>{lang === 'hi' ? 'शुल्क 30 दिन प्रति चक्र के हिसाब से जुड़ता है' : 'Fees accumulate every 30 days from original due date'}</p>
           </div>
           <div className="flex items-center gap-2">
             <select className="form-select" style={{ width: 120 }} value={targetMonth} onChange={e => setTargetMonth(parseInt(e.target.value))}>
@@ -73,7 +113,7 @@ export default function OverduePage() {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <span>
             <strong>{overdue.length} {t.membersUnpaid}</strong> {months[targetMonth-1]} {targetYear}.
-            &nbsp;₹{totalUnpaid.toLocaleString()}
+            &nbsp;{lang === 'hi' ? 'कुल बकाया:' : 'Total accumulated:'} <strong>₹{grandTotal.toLocaleString()}</strong>
           </span>
         </div>
       )}
@@ -103,35 +143,57 @@ export default function OverduePage() {
                 <th>{t.member}</th>
                 <th>{t.memberId}</th>
                 <th>{t.phone}</th>
-                <th>{t.email}</th>
-                <th>{t.amount}</th>
-                <th>{t.dueDay}</th>
+                <th style={{ whiteSpace: 'nowrap' }}>{lang === 'hi' ? 'मूल शुल्क' : 'Base Fee'}</th>
+                <th style={{ whiteSpace: 'nowrap' }}>{lang === 'hi' ? 'चक्र' : 'Cycles'}</th>
+                <th style={{ whiteSpace: 'nowrap' }}>{lang === 'hi' ? 'कुल बकाया' : 'Total Due'}</th>
                 <th>{t.status}</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
                   {search ? t.noMembersFoundSearch : t.noOverdue}
                 </td></tr>
               ) : filtered.map((m, idx) => {
                 const pastDue = isDueDatePassed(m.fee_due_day)
+                const { cycles, total } = calcAmountDue(m, today)
+                const isAccumulated = cycles > 1
                 return (
                   <tr key={m.id} className={pastDue ? 'overdue' : ''}>
                     <td className="text-muted text-sm">{idx + 1}</td>
                     <td className="font-medium">{m.name}</td>
                     <td><code style={{ fontSize: 12 }}>{m.member_id}</code></td>
                     <td>{m.phone || '—'}</td>
-                    <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.email || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>₹{m.fee_amount}</td>
-                    <td>{m.fee_due_day}</td>
+                    <td>₹{parseFloat(m.fee_amount).toLocaleString()}</td>
+                    <td>
+                      <span className={`badge ${isAccumulated ? 'badge-danger' : 'badge-warning'}`}>
+                        {cycles}×
+                      </span>
+                    </td>
+                    <td style={{ fontWeight: 700, color: isAccumulated ? 'var(--danger)' : 'var(--text)' }}>
+                      ₹{total.toLocaleString()}
+                      {isAccumulated && (
+                        <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 4 }}>
+                          ({cycles} {lang === 'hi' ? 'महीने' : 'months'})
+                        </span>
+                      )}
+                    </td>
                     <td>
                       {pastDue
                         ? <span className="badge badge-danger">⚠️ {t.overdueBadge}</span>
                         : <span className="badge badge-warning">{t.dueSoon}</span>
                       }
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => navigate('/fees', { state: { prefill: { member_id: m.id, amount: total, cycles } } })}
+                      >
+                        {t.collectFee}
+                      </button>
                     </td>
                   </tr>
                 )
@@ -139,6 +201,16 @@ export default function OverduePage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Accumulation explainer */}
+      <div style={{ marginTop: 20, padding: '14px 18px', borderRadius: 'var(--radius)', border: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <span style={{ fontSize: 18, flexShrink: 0 }}>💡</span>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.65, margin: 0 }}>
+          {lang === 'hi'
+            ? 'शुल्क हर 30 दिन में एक बार जुड़ता है। उदाहरण: यदि किसी सदस्य का शुल्क 1 जून को देय था और उन्होंने 3 जुलाई को भुगतान किया, तो 2 चक्र (जून + जुलाई) के लिए कुल ₹1000 देना होगा।'
+            : 'Fees accumulate once every 30 days from the original due date. Example: if due on 1 Jun and paid on 3 Jul, 2 cycles have elapsed — total owed is ₹1,000 (2 × ₹500).'}
+        </p>
       </div>
     </div>
   )
