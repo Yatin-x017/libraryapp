@@ -1,351 +1,437 @@
-import { useState, useMemo } from 'react';
-import { useStore } from '../store/useStore';
+import { useState, useEffect, useMemo } from 'react'
+import { supabase } from '../lib/supabase'
+import { useAuth } from '../context/AuthContext'
+import { useLang } from '../context/LanguageContext'
+import { format, parseISO } from 'date-fns'
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => new Date().toISOString().slice(0, 10)
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+export default function AttendancePage() {
+  const { staffProfile } = useAuth()
+  const { t, lang } = useLang()
 
-function formatDate(dateKey) {
-  const d = new Date(dateKey + 'T00:00:00');
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-}
+  const [members, setMembers]           = useState([])
+  const [todayLog, setTodayLog]         = useState([])   // [{member_id, id, ...}]
+  const [logDates, setLogDates]         = useState([])   // ['2026-06-01', ...]
+  const [selectedDate, setSelectedDate] = useState(null)
+  const [dateLog, setDateLog]           = useState([])   // present members for selectedDate
+  const [monthlySummary, setMonthlySummary] = useState([]) // [{member_id, name, days}]
+  const [search, setSearch]             = useState('')
+  const [logSearch, setLogSearch]       = useState('')
+  const [activeTab, setActiveTab]       = useState('today')
+  const [loading, setLoading]           = useState(true)
+  const [loadingDate, setLoadingDate]   = useState(false)
+  const [msg, setMsg]                   = useState(null)
 
-function formatDay(dateKey) {
-  const d = new Date(dateKey + 'T00:00:00');
-  return d.toLocaleDateString('en-IN', { weekday: 'short' });
-}
+  const today = todayStr()
 
-export default function Attendance() {
-  const { students, attendanceLogs, markPresent, markAbsent, resetTodayAttendance } = useStore();
-  const [activeTab, setActiveTab] = useState('today');
-  const [search, setSearch] = useState('');
-  const [logSearch, setLogSearch] = useState('');
-  const [selectedDate, setSelectedDate] = useState(null);
+  // ── Initial load ─────────────────────────────────────────
+  useEffect(() => {
+    fetchAll()
+  }, [])
 
-  const today = todayStr();
+  async function fetchAll() {
+    setLoading(true)
+    const [{ data: mems }, { data: att }, { data: dates }] = await Promise.all([
+      supabase.from('members').select('id,member_id,name,phone,is_active').eq('is_active', true).order('name'),
+      supabase.from('attendance').select('id,member_id,marked_at').eq('date', today),
+      supabase.from('attendance').select('date').gte('date', '2026-06-01').order('date', { ascending: false }),
+    ])
+    setMembers(mems || [])
+    setTodayLog(att || [])
 
-  // --- TODAY TAB ---
-  const filtered = useMemo(() => {
-    if (!search.trim()) return students;
-    return students.filter(s => s.name.toLowerCase().includes(search.toLowerCase()) || s.mobile.includes(search));
-  }, [students, search]);
+    // unique dates
+    const unique = [...new Set((dates || []).map(r => r.date))]
+    setLogDates(unique)
+    setLoading(false)
+  }
 
-  const presentCount = students.filter(s => s.presentToday).length;
-  const absentCount = students.length - presentCount;
+  // ── Mark present ─────────────────────────────────────────
+  async function markPresent(member) {
+    const alreadyIn = todayLog.some(r => r.member_id === member.id)
+    if (alreadyIn) return
+    const { data, error } = await supabase.from('attendance').insert({
+      member_id: member.id,
+      date: today,
+      marked_at: new Date().toISOString(),
+      marked_by: staffProfile?.id ?? null,
+    }).select().single()
+    if (error) { flash('danger', error.message); return }
+    setTodayLog(prev => [...prev, data])
+  }
 
-  // --- LOGS TAB ---
-  // Get last 30 days with logs, sorted newest first
-  const logDates = useMemo(() => {
-    const days = [];
-    for (let i = 0; i < 30; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      days.push(key);
-    }
-    return days;
-  }, []);
+  // ── Mark absent (remove) ─────────────────────────────────
+  async function markAbsent(member) {
+    const row = todayLog.find(r => r.member_id === member.id)
+    if (!row) return
+    const { error } = await supabase.from('attendance').delete().eq('id', row.id)
+    if (error) { flash('danger', error.message); return }
+    setTodayLog(prev => prev.filter(r => r.id !== row.id))
+  }
 
-  const activeDate = selectedDate ?? today;
-  const activeDayLog = attendanceLogs[activeDate] ?? [];
+  // ── Reset today ──────────────────────────────────────────
+  async function resetToday() {
+    const ids = todayLog.map(r => r.id)
+    if (ids.length === 0) return
+    const { error } = await supabase.from('attendance').delete().in('id', ids)
+    if (error) { flash('danger', error.message); return }
+    setTodayLog([])
+    flash('success', lang === 'hi' ? 'आज की उपस्थिति रीसेट हुई।' : "Today's attendance reset.")
+  }
 
-  // Search within active day log
-  const filteredDayLog = useMemo(() => {
-    if (!logSearch.trim()) return activeDayLog;
-    return activeDayLog.filter(e => e.name.toLowerCase().includes(logSearch.toLowerCase()));
-  }, [activeDayLog, logSearch]);
+  // ── Load a past date ─────────────────────────────────────
+  async function loadDate(date) {
+    setSelectedDate(date)
+    setLoadingDate(true)
+    const { data } = await supabase
+      .from('attendance')
+      .select('member_id, members(name, member_id)')
+      .eq('date', date)
+    setDateLog(data || [])
 
-  // Monthly summary: unique students who attended at least once
-  const monthlySummary = useMemo(() => {
-    const summary = {};
-    logDates.forEach(date => {
-      (attendanceLogs[date] ?? []).forEach(e => {
-        if (!summary[e.id]) summary[e.id] = { name: e.name, days: 0, dates: [] };
-        summary[e.id].days++;
-        summary[e.id].dates.push(date);
-      });
-    });
-    return Object.values(summary).sort((a, b) => b.days - a.days);
-  }, [attendanceLogs, logDates]);
+    // 30-day summary
+    const { data: summary } = await supabase
+      .from('attendance')
+      .select('member_id, members(name)')
+      .gte('date', '2026-06-01')
+    const counts = {}
+    ;(summary || []).forEach(r => {
+      const key = r.member_id
+      if (!counts[key]) counts[key] = { name: r.members?.name ?? '—', days: 0 }
+      counts[key].days++
+    })
+    setMonthlySummary(Object.values(counts).sort((a, b) => b.days - a.days))
+    setLoadingDate(false)
+  }
 
-  const totalPresences = logDates.reduce((sum, d) => sum + (attendanceLogs[d]?.length ?? 0), 0);
+  function flash(type, text) {
+    setMsg({ type, text })
+    setTimeout(() => setMsg(null), 3000)
+  }
+
+  // ── Derived ───────────────────────────────────────────────
+  const presentIds = new Set(todayLog.map(r => r.member_id))
+  const presentCount = presentIds.size
+  const absentCount  = members.length - presentCount
+  const rate         = members.length ? Math.round((presentCount / members.length) * 100) : 0
+
+  const filteredMembers = useMemo(() => {
+    if (!search.trim()) return members
+    const q = search.toLowerCase()
+    return members.filter(m =>
+      m.name.toLowerCase().includes(q) || (m.phone || '').includes(q) || m.member_id.toLowerCase().includes(q)
+    )
+  }, [members, search])
+
+  const filteredDateLog = useMemo(() => {
+    if (!logSearch.trim()) return dateLog
+    const q = logSearch.toLowerCase()
+    return dateLog.filter(r => r.members?.name?.toLowerCase().includes(q))
+  }, [dateLog, logSearch])
+
+  function fmtDate(d) {
+    try { return format(parseISO(d), 'd MMM yyyy') } catch { return d }
+  }
+  function fmtDay(d) {
+    try { return format(parseISO(d), 'EEE') } catch { return '' }
+  }
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 40, color: 'var(--text-muted)' }}>
+      <div className="spinner"></div> {lang === 'hi' ? 'लोड हो रहा है...' : 'Loading...'}
+    </div>
+  )
 
   return (
-    <div style={{ padding: '32px 28px', background: '#0d1117', minHeight: '100vh', color: '#e2e8f0' }}>
+    <div>
       {/* Header */}
-      <div style={{ marginBottom: '28px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
-          <span style={{ fontSize: '28px' }}>📅</span>
-          <h1 style={{ margin: 0, fontSize: '26px', fontWeight: '800', color: '#f1f5f9', letterSpacing: '-0.5px' }}>
-            Attendance
-          </h1>
-        </div>
-        <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>
-          Auto-resets at midnight · Today: {formatDate(today)}
-        </p>
+      <div className="page-header">
+        <h2>📅 {t.attendanceTitle}</h2>
+        <p>{lang === 'hi' ? 'आधी रात को स्वतः रीसेट होती है' : 'Auto-resets at midnight'} · {lang === 'hi' ? 'आज' : 'Today'}: {fmtDate(today)}</p>
       </div>
+
+      {msg && (
+        <div className={`alert alert-${msg.type}`} style={{ cursor: 'pointer' }} onClick={() => setMsg(null)}>
+          {msg.text}
+        </div>
+      )}
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '6px', marginBottom: '24px', borderBottom: '1px solid #1e293b' }}>
-        {[['today', "📋 Today's Attendance"], ['logs', '📊 Monthly Logs']].map(([tab, label]) => (
-          <button key={tab} onClick={() => setActiveTab(tab)} style={{
-            padding: '10px 20px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: '700',
-            background: 'transparent',
-            color: activeTab === tab ? '#f59e0b' : '#475569',
-            borderBottom: activeTab === tab ? '2px solid #f59e0b' : '2px solid transparent',
-            marginBottom: '-1px', transition: 'all 0.15s',
-          }}>{label}</button>
-        ))}
+      <div className="tabs">
+        <button className={`tab ${activeTab === 'today' ? 'active' : ''}`} onClick={() => setActiveTab('today')}>
+          📋 {lang === 'hi' ? 'आज की उपस्थिति' : "Today's Attendance"}
+        </button>
+        <button className={`tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => { setActiveTab('logs'); if (!selectedDate && logDates[0]) loadDate(logDates[0]) }}>
+          📊 {lang === 'hi' ? 'मासिक लॉग' : 'Monthly Logs'}
+        </button>
       </div>
 
-      {/* ===== TODAY TAB ===== */}
+      {/* ══════════ TODAY TAB ══════════ */}
       {activeTab === 'today' && (
         <>
-          {/* Stats row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px', marginBottom: '24px' }}>
-            {[
-              { label: 'Total Members', value: students.length, icon: '👥', color: '#60a5fa' },
-              { label: 'Present Today', value: presentCount, icon: '✅', color: '#4ade80' },
-              { label: 'Absent Today', value: absentCount, icon: '🚫', color: '#f87171' },
-              { label: 'Attendance Rate', value: students.length ? `${Math.round((presentCount / students.length) * 100)}%` : '0%', icon: '📈', color: '#a78bfa' },
-            ].map(c => (
-              <div key={c.label} style={{ background: '#161b22', border: '1px solid #1e293b', borderRadius: '12px', padding: '18px' }}>
-                <span style={{ fontSize: '20px' }}>{c.icon}</span>
-                <div style={{ fontSize: '26px', fontWeight: '800', color: c.color, marginTop: '6px' }}>{c.value}</div>
-                <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{c.label}</div>
-              </div>
-            ))}
+          {/* Stat cards */}
+          <div className="stats-grid">
+            <div className="stat-card accent">
+              <div className="label">{t.totalMembers}</div>
+              <div className="value">{members.length}</div>
+              <div className="sub">{t.activeMembers}</div>
+            </div>
+            <div className="stat-card" style={{ background: 'var(--success-light)', borderColor: '#bbf7d0' }}>
+              <div className="label">{t.presentToday}</div>
+              <div className="value" style={{ color: 'var(--success)' }}>{presentCount}</div>
+              <div className="sub">{lang === 'hi' ? `${members.length} में से` : `of ${members.length}`}</div>
+            </div>
+            <div className="stat-card danger">
+              <div className="label">{lang === 'hi' ? 'आज अनुपस्थित' : 'Absent Today'}</div>
+              <div className="value">{absentCount}</div>
+            </div>
+            <div className="stat-card warning">
+              <div className="label">{lang === 'hi' ? 'उपस्थिति दर' : 'Attendance Rate'}</div>
+              <div className="value">{rate}%</div>
+            </div>
           </div>
 
           {/* Progress bar */}
-          <div style={{ background: '#161b22', border: '1px solid #1e293b', borderRadius: '12px', padding: '16px 20px', marginBottom: '20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Today's presence</span>
-              <span style={{ fontSize: '13px', fontWeight: '700', color: '#f59e0b' }}>
-                {presentCount}/{students.length}
+          <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
+                {lang === 'hi' ? 'आज की उपस्थिति' : "Today's presence"}
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>
+                {presentCount}/{members.length}
               </span>
             </div>
-            <div style={{ background: '#0d1117', borderRadius: '999px', height: '8px', overflow: 'hidden' }}>
+            <div style={{ background: 'var(--surface2)', borderRadius: 999, height: 8, overflow: 'hidden' }}>
               <div style={{
-                width: `${students.length ? (presentCount / students.length) * 100 : 0}%`,
-                background: 'linear-gradient(90deg, #4ade80, #60a5fa)',
-                height: '100%', borderRadius: '999px', transition: 'width 0.4s ease',
+                width: `${members.length ? (presentCount / members.length) * 100 : 0}%`,
+                background: 'linear-gradient(90deg, var(--accent-mid), var(--accent))',
+                height: '100%', borderRadius: 999, transition: 'width 0.4s ease',
               }} />
             </div>
           </div>
 
           {/* Search + Reset */}
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
-            <input
-              value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="🔍  Search by name or mobile..."
-              style={{
-                flex: 1, padding: '12px 16px', borderRadius: '10px', border: '1px solid #1e293b',
-                background: '#161b22', color: '#e2e8f0', fontSize: '14px', outline: 'none',
-              }}
-            />
-            <button onClick={resetTodayAttendance} style={{
-              padding: '10px 18px', borderRadius: '10px', border: '1px solid #ef4444',
-              background: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer', fontSize: '12px', fontWeight: '700',
-              whiteSpace: 'nowrap',
-            }}>↺ Reset All</button>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+            <div className="search-bar" style={{ flex: 1, marginBottom: 0 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--text-subtle)', flexShrink: 0 }}>
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+              </svg>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder={lang === 'hi' ? 'नाम या मोबाइल से खोजें...' : 'Search by name or mobile...'}
+              />
+              {search && <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16 }}>✕</button>}
+            </div>
+            <button className="btn btn-danger btn-sm" onClick={resetToday} style={{ whiteSpace: 'nowrap' }}>
+              ↺ {lang === 'hi' ? 'सभी रीसेट करें' : 'Reset All'}
+            </button>
           </div>
 
-          {/* Student list */}
-          <div style={{ background: '#161b22', border: '1px solid #1e293b', borderRadius: '16px', overflow: 'hidden' }}>
-            {/* Header row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.4fr 0.8fr 1fr 1.4fr', padding: '12px 20px', background: '#0d1117', borderBottom: '1px solid #1e293b' }}>
-              {['Student', 'Mobile', 'Seat', 'Status', 'Action'].map(h => (
-                <span key={h} style={{ fontSize: '11px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</span>
-              ))}
-            </div>
-
-            {filtered.length === 0 && (
-              <div style={{ padding: '40px', textAlign: 'center', color: '#475569' }}>No students found</div>
-            )}
-
-            {filtered.map((s, i) => (
-              <div key={s.id} style={{
-                display: 'grid', gridTemplateColumns: '2fr 1.4fr 0.8fr 1fr 1.4fr',
-                padding: '14px 20px', borderBottom: i < filtered.length - 1 ? '1px solid #1e293b' : 'none',
-                alignItems: 'center',
-                background: s.presentToday ? 'rgba(74,222,128,0.03)' : 'transparent',
-              }}>
-                <div>
-                  <div style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>{s.name}</div>
-                </div>
-                <span style={{ fontSize: '13px', color: '#64748b', fontFamily: 'monospace' }}>{s.mobile}</span>
-                <span style={{ fontSize: '13px', color: '#60a5fa', fontWeight: '600' }}>{s.seatNo || '—'}</span>
-                <span style={{
-                  display: 'inline-block', padding: '4px 12px', borderRadius: '999px', fontSize: '12px', fontWeight: '700',
-                  background: s.presentToday ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.08)',
-                  color: s.presentToday ? '#4ade80' : '#f87171',
-                  border: `1px solid ${s.presentToday ? 'rgba(74,222,128,0.25)' : 'rgba(248,113,113,0.2)'}`,
-                }}>{s.presentToday ? '✓ Present' : '✗ Absent'}</span>
-                <div>
-                  {!s.presentToday ? (
-                    <button onClick={() => markPresent(s.id)} style={{
-                      padding: '6px 14px', borderRadius: '8px', border: '1px solid #4ade80',
-                      background: 'transparent', color: '#4ade80', cursor: 'pointer', fontSize: '12px', fontWeight: '600',
-                    }}>Mark Present</button>
-                  ) : (
-                    <button onClick={() => markAbsent(s.id)} style={{
-                      padding: '6px 14px', borderRadius: '8px', border: '1px solid #334155',
-                      background: 'transparent', color: '#475569', cursor: 'pointer', fontSize: '12px',
-                    }}>Mark Absent</button>
+          {/* Member table */}
+          <div className="card" style={{ padding: 0 }}>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t.memberId}</th>
+                    <th>{t.name}</th>
+                    <th>{t.phone}</th>
+                    <th>{lang === 'hi' ? 'स्थिति' : 'Status'}</th>
+                    <th>{lang === 'hi' ? 'कार्रवाई' : 'Action'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredMembers.length === 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
+                        {t.noMembersFound}
+                      </td>
+                    </tr>
                   )}
-                </div>
-              </div>
-            ))}
+                  {filteredMembers.map(m => {
+                    const isPresent = presentIds.has(m.id)
+                    return (
+                      <tr key={m.id} style={{ background: isPresent ? 'var(--success-light)' : undefined }}>
+                        <td><code style={{ fontSize: 12, color: 'var(--text-muted)' }}>{m.member_id}</code></td>
+                        <td style={{ fontWeight: 500 }}>{m.name}</td>
+                        <td style={{ color: 'var(--text-muted)' }}>{m.phone || '—'}</td>
+                        <td>
+                          <span className={`badge ${isPresent ? 'badge-success' : 'badge-danger'}`}>
+                            {isPresent
+                              ? (lang === 'hi' ? '✓ उपस्थित' : '✓ Present')
+                              : (lang === 'hi' ? '✗ अनुपस्थित' : '✗ Absent')}
+                          </span>
+                        </td>
+                        <td>
+                          {!isPresent ? (
+                            <button className="btn btn-primary btn-sm" onClick={() => markPresent(m)}>
+                              {lang === 'hi' ? 'उपस्थित करें' : 'Mark Present'}
+                            </button>
+                          ) : (
+                            <button className="btn btn-sm" style={{ color: 'var(--danger)', borderColor: '#fecaca' }} onClick={() => markAbsent(m)}>
+                              {lang === 'hi' ? 'हटाएं' : 'Mark Absent'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
 
-      {/* ===== MONTHLY LOGS TAB ===== */}
+      {/* ══════════ LOGS TAB ══════════ */}
       {activeTab === 'logs' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 20, alignItems: 'start' }}>
 
-          {/* LEFT: Date sidebar */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ fontSize: '11px', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px', fontWeight: '700' }}>Last 30 Days</div>
-            <div style={{ maxHeight: '600px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {/* Left: Date list */}
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, fontWeight: 700 }}>
+              {lang === 'hi' ? 'तिथियां' : 'Dates'}
+            </div>
+            {logDates.length === 0 && (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                {lang === 'hi' ? 'कोई लॉग नहीं' : 'No logs yet'}
+              </p>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 560, overflowY: 'auto' }}>
               {logDates.map(date => {
-                const count = attendanceLogs[date]?.length ?? 0;
-                const isToday = date === today;
-                const isSelected = date === activeDate;
+                const isSelected = date === selectedDate
+                const isToday    = date === today
                 return (
-                  <button key={date} onClick={() => setSelectedDate(date)} style={{
-                    padding: '10px 14px', borderRadius: '10px', border: 'none', cursor: 'pointer', textAlign: 'left',
-                    background: isSelected ? 'rgba(245,158,11,0.12)' : 'transparent',
-                    border: `1px solid ${isSelected ? 'rgba(245,158,11,0.4)' : '#1e293b'}`,
-                    transition: 'all 0.12s',
-                  }}>
+                  <button
+                    key={date}
+                    onClick={() => loadDate(date)}
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: 'var(--radius)',
+                      border: `1px solid ${isSelected ? 'var(--accent-mid)' : 'var(--border)'}`,
+                      background: isSelected ? 'var(--accent-light)' : 'var(--surface)',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.12s',
+                    }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
-                        <span style={{ fontSize: '13px', fontWeight: isSelected ? '700' : '500', color: isSelected ? '#f59e0b' : '#e2e8f0' }}>
-                          {isToday ? '📍 Today' : formatDate(date)}
-                        </span>
-                        <div style={{ fontSize: '11px', color: '#475569', marginTop: '1px' }}>{formatDay(date)}</div>
+                        <div style={{ fontSize: 13, fontWeight: isSelected ? 700 : 500, color: isSelected ? 'var(--accent)' : 'var(--text)' }}>
+                          {isToday ? `📍 ${lang === 'hi' ? 'आज' : 'Today'}` : fmtDate(date)}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{fmtDay(date)}</div>
                       </div>
-                      <span style={{
-                        fontSize: '12px', fontWeight: '700', padding: '2px 8px', borderRadius: '999px',
-                        background: count > 0 ? 'rgba(74,222,128,0.1)' : 'rgba(100,116,139,0.1)',
-                        color: count > 0 ? '#4ade80' : '#475569',
-                      }}>{count}</span>
                     </div>
-                    {/* Mini bar */}
-                    {students.length > 0 && (
-                      <div style={{ marginTop: '6px', background: '#0d1117', borderRadius: '999px', height: '3px', overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${(count / students.length) * 100}%`,
-                          background: count > 0 ? '#4ade80' : '#1e293b',
-                          height: '100%', borderRadius: '999px',
-                        }} />
-                      </div>
-                    )}
                   </button>
-                );
+                )
               })}
             </div>
           </div>
 
-          {/* RIGHT: Day detail + monthly summary */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Right: Detail + Summary */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
             {/* Selected day detail */}
-            <div style={{ background: '#161b22', border: '1px solid #1e293b', borderRadius: '16px', overflow: 'hidden' }}>
-              <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="card" style={{ padding: 0 }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontWeight: '700', fontSize: '15px', color: '#f1f5f9' }}>
-                    {activeDate === today ? '📍 Today' : formatDate(activeDate)}
-                    <span style={{ marginLeft: '8px', fontSize: '12px', color: '#475569', fontWeight: '400' }}>{formatDay(activeDate)}</span>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
+                    {selectedDate
+                      ? (selectedDate === today ? `📍 ${lang === 'hi' ? 'आज' : 'Today'}` : fmtDate(selectedDate))
+                      : (lang === 'hi' ? 'तिथि चुनें' : 'Select a date')}
+                    {selectedDate && (
+                      <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text-muted)', fontWeight: 400 }}>{fmtDay(selectedDate)}</span>
+                    )}
                   </div>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                    {activeDayLog.length} present · {students.length - activeDayLog.length} absent
-                  </div>
-                </div>
-                <input
-                  value={logSearch} onChange={e => setLogSearch(e.target.value)}
-                  placeholder="🔍 Search..."
-                  style={{
-                    padding: '8px 14px', borderRadius: '8px', border: '1px solid #1e293b',
-                    background: '#0d1117', color: '#e2e8f0', fontSize: '13px', outline: 'none', width: '180px',
-                  }}
-                />
-              </div>
-
-              {filteredDayLog.length === 0 ? (
-                <div style={{ padding: '40px', textAlign: 'center', color: '#475569' }}>
-                  {activeDayLog.length === 0 ? '🚫 No attendance recorded for this day' : 'No results'}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '16px 20px' }}>
-                  {filteredDayLog.map(entry => (
-                    <span key={entry.id} style={{
-                      padding: '6px 14px', borderRadius: '999px', fontSize: '13px', fontWeight: '600',
-                      background: 'rgba(74,222,128,0.08)', color: '#4ade80',
-                      border: '1px solid rgba(74,222,128,0.2)',
-                    }}>✓ {entry.name}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Monthly Summary Table */}
-            <div style={{ background: '#161b22', border: '1px solid #1e293b', borderRadius: '16px', overflow: 'hidden' }}>
-              <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: '700', fontSize: '14px', color: '#f1f5f9' }}>📊 30-Day Summary</div>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
-                    {totalPresences} total check-ins · {monthlySummary.length} unique students attended
-                  </div>
-                </div>
-              </div>
-
-              {/* Table header */}
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', padding: '10px 20px', background: '#0d1117', borderBottom: '1px solid #1e293b' }}>
-                {['Student', 'Days Present', 'Rate', 'Attendance'].map(h => (
-                  <span key={h} style={{ fontSize: '11px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</span>
-                ))}
-              </div>
-
-              {monthlySummary.length === 0 && (
-                <div style={{ padding: '40px', textAlign: 'center', color: '#475569' }}>No attendance data yet</div>
-              )}
-
-              {monthlySummary.map((entry, i) => {
-                const rate = Math.round((entry.days / 30) * 100);
-                return (
-                  <div key={entry.name} style={{
-                    display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr',
-                    padding: '13px 20px', borderBottom: i < monthlySummary.length - 1 ? '1px solid #1e293b' : 'none',
-                    alignItems: 'center',
-                  }}>
-                    <span style={{ fontWeight: '600', fontSize: '14px', color: '#f1f5f9' }}>{entry.name}</span>
-                    <span style={{ fontSize: '14px', fontWeight: '700', color: '#60a5fa' }}>{entry.days} days</span>
-                    <span style={{
-                      fontSize: '13px', fontWeight: '700',
-                      color: rate >= 70 ? '#4ade80' : rate >= 40 ? '#f59e0b' : '#f87171',
-                    }}>{rate}%</span>
-                    {/* Mini heatmap bar */}
-                    <div style={{ display: 'flex', gap: '2px', flexWrap: 'wrap' }}>
-                      {logDates.slice().reverse().map(date => {
-                        const wasPresent = (attendanceLogs[date] ?? []).some(e => e.name === entry.name);
-                        return (
-                          <div key={date} title={formatDate(date)} style={{
-                            width: '8px', height: '8px', borderRadius: '2px',
-                            background: wasPresent ? '#4ade80' : '#1e293b',
-                          }} />
-                        );
-                      })}
+                  {selectedDate && !loadingDate && (
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                      {dateLog.length} {lang === 'hi' ? 'उपस्थित' : 'present'} · {members.length - dateLog.length} {lang === 'hi' ? 'अनुपस्थित' : 'absent'}
                     </div>
+                  )}
+                </div>
+                <div className="search-bar" style={{ marginBottom: 0, width: 180 }}>
+                  <input
+                    value={logSearch}
+                    onChange={e => setLogSearch(e.target.value)}
+                    placeholder={lang === 'hi' ? 'खोजें...' : 'Search...'}
+                    style={{ fontSize: 13 }}
+                  />
+                </div>
+              </div>
+              <div style={{ padding: '16px 20px', minHeight: 60 }}>
+                {loadingDate ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="spinner"></div>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{lang === 'hi' ? 'लोड हो रहा है...' : 'Loading...'}</span>
                   </div>
-                );
-              })}
+                ) : !selectedDate ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                    {lang === 'hi' ? '← बाईं ओर से तिथि चुनें' : '← Select a date on the left'}
+                  </p>
+                ) : filteredDateLog.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                    {dateLog.length === 0
+                      ? (lang === 'hi' ? '🚫 इस दिन कोई उपस्थिति नहीं' : '🚫 No attendance recorded for this day')
+                      : (lang === 'hi' ? 'कोई परिणाम नहीं' : 'No results')}
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {filteredDateLog.map(r => (
+                      <span key={r.member_id} className="badge badge-success" style={{ padding: '4px 12px', fontSize: 13 }}>
+                        ✓ {r.members?.name ?? '—'}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* Monthly summary table */}
+            {monthlySummary.length > 0 && (
+              <div className="card" style={{ padding: 0 }}>
+                <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
+                    📊 {lang === 'hi' ? '1 जून से सारांश' : 'Summary since 1 Jun'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {lang === 'hi' ? 'कुल उपस्थित दिन प्रति सदस्य' : 'Total days present per member'}
+                  </div>
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{t.name}</th>
+                        <th>{lang === 'hi' ? 'उपस्थित दिन' : 'Days Present'}</th>
+                        <th>{lang === 'hi' ? 'दर' : 'Rate'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monthlySummary.map((entry, i) => {
+                        const totalDays = logDates.length || 1
+                        const rate = Math.round((entry.days / totalDays) * 100)
+                        return (
+                          <tr key={i}>
+                            <td style={{ fontWeight: 500 }}>{entry.name}</td>
+                            <td><span className="badge badge-info">{entry.days}</span></td>
+                            <td>
+                              <span className={`badge ${rate >= 70 ? 'badge-success' : rate >= 40 ? 'badge-warning' : 'badge-danger'}`}>
+                                {rate}%
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
     </div>
-  );
+  )
 }
