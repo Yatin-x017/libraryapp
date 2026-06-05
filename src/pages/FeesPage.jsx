@@ -116,21 +116,124 @@ function PaymentModal({ members, onClose, onSave, t, months, prefill }) {
   )
 }
 
+function EditPaymentModal({ payment, members, onClose, onSave, t, months, lang }) {
+  const [form, setForm] = useState({
+    member_id: payment.member_id || '',
+    month:     payment.month,
+    year:      payment.year,
+    amount:    payment.amount || '',
+    paid_on:   payment.paid_on ? payment.paid_on.slice(0, 10) : format(new Date(), 'yyyy-MM-dd'),
+    notes:     payment.notes || '',
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+
+  function update(k, v) { setForm(f => ({ ...f, [k]: v })) }
+
+  const selectedMember = members.find(m => m.id === form.member_id)
+  const baseFee        = selectedMember ? parseFloat(selectedMember.fee_amount) : 0
+  const enteredAmount  = parseFloat(form.amount) || 0
+  const cycles         = baseFee > 0 ? Math.round(enteredAmount / baseFee) : 1
+  const isMultiMonth   = cycles > 1
+
+  async function handleSave() {
+    if (!form.amount) { setError(t.selectMemberAmount); return }
+    setLoading(true)
+    setError('')
+    const err = await onSave(payment.id, form)
+    if (err) setError(err)
+    setLoading(false)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 520 }}>
+        <div className="modal-header">
+          <h3>{lang === 'hi' ? 'भुगतान संपादित करें' : 'Edit Payment'}</h3>
+          <button className="btn btn-icon" onClick={onClose}>✕</button>
+        </div>
+        {error && <div className="alert alert-danger">{error}</div>}
+
+        {/* Member (read-only in edit — changing member would alter history) */}
+        <div className="form-group">
+          <label className="form-label">{t.selectMemberLabel}</label>
+          <input
+            className="form-input"
+            value={selectedMember ? `${selectedMember.name} (${selectedMember.member_id})` : '—'}
+            readOnly
+            style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', cursor: 'not-allowed' }}
+          />
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">{t.monthLabel}</label>
+            <select className="form-select" value={form.month} onChange={e => update('month', parseInt(e.target.value))}>
+              {months.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">{t.yearLabel}</label>
+            <input className="form-input" type="number" value={form.year} onChange={e => update('year', parseInt(e.target.value))} />
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">{t.amountLabel}</label>
+            <input
+              className="form-input"
+              type="number"
+              value={form.amount}
+              onChange={e => update('amount', e.target.value)}
+              placeholder="500"
+            />
+            {isMultiMonth && (
+              <div style={{ marginTop: 5, fontSize: 12, color: 'var(--warning)', background: 'var(--warning-light)', padding: '5px 10px', borderRadius: 6, border: '1px solid #fde68a' }}>
+                💡 {lang === 'hi'
+                  ? `₹${baseFee} × ${cycles} महीने = ₹${enteredAmount}`
+                  : `₹${baseFee} × ${cycles} months = ₹${enteredAmount}`}
+              </div>
+            )}
+          </div>
+          <div className="form-group">
+            <label className="form-label">{t.paidOnLabel}</label>
+            <input className="form-input" type="date" value={form.paid_on} onChange={e => update('paid_on', e.target.value)} />
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">{t.notes}</label>
+          <input className="form-input" value={form.notes} onChange={e => update('notes', e.target.value)} placeholder={t.notesPlaceholder} />
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn" onClick={onClose}>{t.cancel}</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={loading}>
+            {loading ? <span className="spinner" style={{ width: 14, height: 14 }}></span> : (lang === 'hi' ? 'सहेजें' : 'Save Changes')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function FeesPage() {
   const { staffProfile } = useAuth()
   const { t, lang } = useLang()
   const location = useLocation()
   const months = lang === 'hi' ? MONTHS_HI : MONTHS_EN
 
-  const [payments, setPayments]     = useState([])
-  const [members, setMembers]       = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [showModal, setShowModal]   = useState(false)
-  const [msg, setMsg]               = useState(null)
+  const [payments, setPayments]       = useState([])
+  const [members, setMembers]         = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [showModal, setShowModal]     = useState(false)
+  const [editPayment, setEditPayment] = useState(null)   // payment row being edited
+  const [msg, setMsg]                 = useState(null)
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth() + 1)
   const [filterYear, setFilterYear]   = useState(new Date().getFullYear())
-  const [search, setSearch]         = useState('')
-  const [prefill, setPrefill]       = useState(null)
+  const [search, setSearch]           = useState('')
+  const [prefill, setPrefill]         = useState(null)
 
   // Open modal pre-filled if navigated from Overdue page
   useEffect(() => {
@@ -164,6 +267,24 @@ export default function FeesPage() {
     setMsg({ type: 'success', text: t.paymentRecorded })
     setShowModal(false)
     setPrefill(null)
+    fetchData()
+    return null
+  }
+
+  async function updatePayment(id, form) {
+    const { error } = await supabase
+      .from('fee_payments')
+      .update({
+        month:   form.month,
+        year:    form.year,
+        amount:  form.amount,
+        paid_on: form.paid_on,
+        notes:   form.notes,
+      })
+      .eq('id', id)
+    if (error) return error.message
+    setMsg({ type: 'success', text: lang === 'hi' ? 'भुगतान अपडेट किया गया।' : 'Payment updated.' })
+    setEditPayment(null)
     fetchData()
     return null
   }
@@ -232,13 +353,14 @@ export default function FeesPage() {
                 <th>{t.paidOn}</th>
                 <th>{t.collectedBy}</th>
                 <th>{t.notes}</th>
+                <th style={{ width: 60 }}>{t.edit}</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>{t.noPayments}</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>{t.noPayments}</td></tr>
               ) : filtered.map(p => {
                 const base = members.find(m => m.id === p.member_id)?.fee_amount
                 const paid = parseFloat(p.amount)
@@ -258,6 +380,14 @@ export default function FeesPage() {
                     <td>{format(new Date(p.paid_on), 'dd MMM yyyy')}</td>
                     <td className="text-muted">{p.staff?.name || '—'}</td>
                     <td className="text-muted" style={{ fontSize: 12 }}>{p.notes || '—'}</td>
+                    <td>
+                      <button
+                        className="btn btn-icon"
+                        title={t.edit}
+                        onClick={() => setEditPayment(p)}
+                        style={{ padding: '4px 8px', fontSize: 14, color: 'var(--primary)' }}
+                      >✏️</button>
+                    </td>
                   </tr>
                 )
               })}
@@ -274,6 +404,18 @@ export default function FeesPage() {
           t={t}
           months={months}
           prefill={prefill}
+        />
+      )}
+
+      {editPayment && (
+        <EditPaymentModal
+          payment={editPayment}
+          members={members}
+          onClose={() => setEditPayment(null)}
+          onSave={updatePayment}
+          t={t}
+          months={months}
+          lang={lang}
         />
       )}
     </div>
