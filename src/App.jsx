@@ -9,6 +9,7 @@ import MembersPage from './pages/MembersPage'
 import FeesPage from './pages/FeesPage'
 import StaffPage from './pages/StaffPage'
 import OverduePage from './pages/OverduePage'
+import NewspaperPage from './pages/NewspaperPage'
 import HelpPage from './pages/HelpPage'
 
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -58,6 +59,7 @@ function AppRoutes() {
         <Route path="members" element={<MembersPage />} />
         <Route path="fees" element={<FeesPage />} />
         <Route path="overdue" element={<OverduePage />} />
+        <Route path="newspaper" element={<NewspaperPage />} />
         <Route path="help" element={<HelpPage />} />
         <Route path="staff" element={<ProtectedRoute adminOnly><StaffPage /></ProtectedRoute>} />
       </Route>
