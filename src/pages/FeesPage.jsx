@@ -455,11 +455,11 @@ export default function FeesPage() {
     const [{ data: payData }, { data: memberData }] = await Promise.all([
       supabase
         .from('fee_payments')
-        .select('*, members(name, member_id), staff(name)')
+        .select('*, members(name, member_id, join_date, payment_day), staff(name)')
         .eq('month', filterMonth)
         .eq('year', filterYear)
         .order('paid_on', { ascending: false }),
-      supabase.from('members').select('id, name, member_id, fee_amount').eq('is_active', true).order('name'),
+      supabase.from('members').select('id, name, member_id, fee_amount, join_date, payment_day').eq('is_active', true).order('name'),
     ])
     const pRows = payData || []
     setPayments(pRows)
@@ -587,6 +587,8 @@ export default function FeesPage() {
                 <th>{t.memberId}</th>
                 <th>{t.amount}</th>
                 <th>{t.paidOn}</th>
+                <th style={{ whiteSpace: 'nowrap' }}>{t.joinDay}</th>
+                <th style={{ whiteSpace: 'nowrap' }}>{t.paymentDay}</th>
                 <th>{t.collectedBy}</th>
                 <th>{t.notes}</th>
                 <th style={{ width: 120, textAlign: 'center' }}>
@@ -596,9 +598,9 @@ export default function FeesPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>{t.noPayments}</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>{t.noPayments}</td></tr>
               ) : filtered.map(p => {
                 const base   = members.find(m => m.id === p.member_id)?.fee_amount
                 const paid   = parseFloat(p.amount)
@@ -617,6 +619,8 @@ export default function FeesPage() {
                       )}
                     </td>
                     <td>{format(new Date(p.paid_on + 'T00:00:00'), 'dd MMM yyyy')}</td>
+                    <td className="text-muted">{p.members?.join_date ? format(new Date(p.members.join_date + 'T00:00:00'), 'dd MMM yyyy') : '—'}</td>
+                    <td className="text-muted">{p.members?.payment_day || '—'}</td>
                     <td className="text-muted">{p.staff?.name || '—'}</td>
                     <td className="text-muted" style={{ fontSize: 12 }}>{p.notes || '—'}</td>
                     <td>
