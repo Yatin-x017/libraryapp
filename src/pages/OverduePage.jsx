@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useNavigate } from 'react-router-dom'
 import { useLang } from '../context/LanguageContext'
+import { format } from 'date-fns'
 
 const MONTHS_EN = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const MONTHS_HI = ['जनवरी','फरवरी','मार्च','अप्रैल','मई','जून','जुलाई','अगस्त','सितंबर','अक्तूबर','नवंबर','दिसंबर']
@@ -45,7 +46,7 @@ export default function OverduePage() {
     setLoading(true)
     const { data: allMembers, error: memberError } = await supabase
       .from('members')
-      .select('id, name, member_id, phone, email, fee_amount, fee_due_day')
+      .select('id, name, member_id, phone, email, fee_amount, fee_due_day, join_date, payment_day')
       .eq('is_active', true)
       .order('name')
     if (memberError) console.error('members fetch error:', memberError)
@@ -144,15 +145,17 @@ export default function OverduePage() {
                 <th style={{ whiteSpace: 'nowrap' }}>{lang === 'hi' ? 'मूल शुल्क' : 'Base Fee'}</th>
                 <th style={{ whiteSpace: 'nowrap' }}>{lang === 'hi' ? 'चक्र' : 'Cycles'}</th>
                 <th style={{ whiteSpace: 'nowrap' }}>{lang === 'hi' ? 'कुल बकाया' : 'Total Due'}</th>
+                <th style={{ whiteSpace: 'nowrap' }}>{t.joinDay}</th>
+                <th style={{ whiteSpace: 'nowrap' }}>{t.paymentDay}</th>
                 <th>{t.status}</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
+                <tr><td colSpan={11} style={{ textAlign: 'center', padding: 32 }}><div className="spinner" style={{ margin: '0 auto' }}></div></td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
+                <tr><td colSpan={11} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>
                   {search ? t.noMembersFoundSearch : t.noOverdue}
                 </td></tr>
               ) : filtered.map((m, idx) => {
@@ -179,6 +182,8 @@ export default function OverduePage() {
                         </span>
                       )}
                     </td>
+                    <td className="text-muted">{m.join_date ? format(new Date(m.join_date + 'T00:00:00'), 'dd MMM yyyy') : '—'}</td>
+                    <td className="text-muted">{m.payment_day || '—'}</td>
                     <td>
                       {pastDue
                         ? <span className="badge badge-danger">⚠️ {t.overdueBadge}</span>
