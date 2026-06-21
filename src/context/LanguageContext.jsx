@@ -11,6 +11,7 @@ const translations = {
     dashboard: 'Dashboard',
     markAttendance: 'Mark Attendance',
     overdueFees: 'Overdue Fees',
+    newspaper: 'Newspaper',
     members: 'Members',
     feePayments: 'Fee Payments',
     staff: 'Staff',
@@ -92,6 +93,18 @@ const translations = {
     searchByNameOrId: 'Search by name or member ID...',
     noMembersFoundSearch: 'No members found for',
     markAllConfirm: 'Mark ALL',
+
+    // Newspaper
+    newspaperTitle: 'Newspaper Log',
+    newspaperSubtitle: "Track whether today's newspaper arrived",
+    newspaperArrivedToday: "Today's newspaper has arrived",
+    newspaperNotArrivedToday: "Today's newspaper hasn't been marked yet",
+    markArrived: 'Mark as Arrived',
+    undoMark: 'Undo',
+    markedBy: 'Marked by',
+    newspaperLog: 'Last 30 Days',
+    arrived: 'Arrived',
+    notMarked: 'Not Marked',
     visibleMembersPresent: 'visible members as present?',
     markedPresent: 'members as present.',
 
@@ -168,6 +181,7 @@ const translations = {
     dashboard: 'डैशबोर्ड',
     markAttendance: 'उपस्थिति दर्ज करें',
     overdueFees: 'बकाया शुल्क',
+    newspaper: 'अखबार',
     members: 'सदस्य',
     feePayments: 'शुल्क भुगतान',
     staff: 'स्टाफ',
@@ -249,6 +263,18 @@ const translations = {
     searchByNameOrId: 'नाम या सदस्य ID से खोजें...',
     noMembersFoundSearch: 'कोई सदस्य नहीं मिला',
     markAllConfirm: 'क्या सभी',
+
+    // Newspaper
+    newspaperTitle: 'अखबार लॉग',
+    newspaperSubtitle: 'आज अखबार आया या नहीं, यह दर्ज करें',
+    newspaperArrivedToday: 'आज का अखबार आ गया है',
+    newspaperNotArrivedToday: 'आज का अखबार अभी दर्ज नहीं हुआ',
+    markArrived: 'आया हुआ दर्ज करें',
+    undoMark: 'पूर्ववत करें',
+    markedBy: 'दर्ज किया',
+    newspaperLog: 'पिछले 30 दिन',
+    arrived: 'आया',
+    notMarked: 'दर्ज नहीं',
     visibleMembersPresent: 'दिखते सदस्यों को उपस्थित करें?',
     markedPresent: 'सदस्य उपस्थित दर्ज किए।',
 
