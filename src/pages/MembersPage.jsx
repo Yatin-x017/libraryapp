@@ -6,7 +6,7 @@ import { useLang } from '../context/LanguageContext'
 function MemberModal({ member, onClose, onSave, t }) {
   const [form, setForm] = useState(member || {
     member_id: '', name: '', phone: '', email: '', address: '',
-    fee_amount: 500, fee_due_day: 1, is_active: true
+    fee_amount: 500, fee_due_day: 1, join_date: '', payment_day: '', is_active: true
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -63,6 +63,16 @@ function MemberModal({ member, onClose, onSave, t }) {
           <div className="form-group">
             <label className="form-label">{t.dueDayLabel}</label>
             <input className="form-input" type="number" min="1" max="28" value={form.fee_due_day} onChange={e => update('fee_due_day', parseInt(e.target.value))} />
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="form-group">
+            <label className="form-label">{t.joinDayLabel}</label>
+            <input className="form-input" type="date" value={form.join_date || ''} onChange={e => update('join_date', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">{t.paymentDayLabel}</label>
+            <input className="form-input" type="number" min="1" max="31" value={form.payment_day || ''} onChange={e => update('payment_day', e.target.value === '' ? null : parseInt(e.target.value))} />
           </div>
         </div>
         {member && (
